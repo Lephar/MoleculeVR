@@ -20,7 +20,7 @@ VkDevice device;
 VkQueue queue;
 VkSwapchainKHR swapchain;
 VkExtent2D swapchainExtent;
-uint32_t imageCount;
+uint32_t imageCount, currentFrame;
 std::vector<VkImage> swapchainImages;
 std::vector<VkImageView> swapchainImageViews;
 VkShaderModule vertexShader, fragmentShader;
@@ -30,8 +30,8 @@ VkPipeline graphicsPipeline;
 std::vector<VkFramebuffer> framebuffers;
 VkCommandPool commandPool;
 std::vector<VkCommandBuffer> commandBuffers;
-VkSemaphore imageAvailableSemaphore;
-VkSemaphore renderFinishedSemaphore;
+std::vector<VkFence> frameFences, orderFences;
+std::vector<VkSemaphore> availableSemaphores, finishedSemaphores;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -370,7 +370,7 @@ void createPipeline() {
 }
 
 void createFramebuffers() {
-    framebuffers.resize(swapchainImageViews.size());
+    framebuffers.resize(imageCount);
     for (size_t i = 0; i < imageCount; i++) {
         VkImageView attachments[] = {swapchainImageViews[i]};
         VkFramebufferCreateInfo framebufferInfo{};
@@ -426,12 +426,26 @@ void createCommandBuffers() {
     }
 }
 
-void createSemaphores() {
+void createSyncObject() {
+    currentFrame = 0;
+
+    frameFences.resize(imageCount);
+    orderFences.resize(imageCount, VK_NULL_HANDLE);
+    availableSemaphores.resize(imageCount);
+    finishedSemaphores.resize(imageCount);
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore);
-    vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore);
+    for (size_t i = 0; i < imageCount; i++) {
+        vkCreateFence(device, &fenceInfo, nullptr, &frameFences[i]);
+        vkCreateSemaphore(device, &semaphoreInfo, nullptr, &availableSemaphores[i]);
+        vkCreateSemaphore(device, &semaphoreInfo, nullptr, &finishedSemaphores[i]);
+    }
 }
 
 void setup() {
@@ -442,16 +456,23 @@ void setup() {
     createPipeline();
     createFramebuffers();
     createCommandBuffers();
-    createSemaphores();
+    createSyncObject();
 }
 
 void draw() {
-    uint32_t imageIndex;
-    vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE,
-                          &imageIndex);
+    vkWaitForFences(device, 1, &frameFences[currentFrame], VK_TRUE, UINT64_MAX);
 
-    VkSemaphore waitSemaphores[] = {imageAvailableSemaphore};
-    VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+    uint32_t imageIndex;
+    vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, availableSemaphores[currentFrame],
+                          VK_NULL_HANDLE, &imageIndex);
+
+    if (orderFences[imageIndex] != VK_NULL_HANDLE)
+        vkWaitForFences(device, 1, &orderFences[imageIndex], VK_TRUE, UINT64_MAX);
+
+    orderFences[imageIndex] = frameFences[currentFrame];
+
+    VkSemaphore waitSemaphores[] = {availableSemaphores[currentFrame]};
+    VkSemaphore signalSemaphores[] = {finishedSemaphores[currentFrame]};
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
 
     VkSubmitInfo submitInfo{};
@@ -464,7 +485,8 @@ void draw() {
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkResetFences(device, 1, &frameFences[currentFrame]);
+    vkQueueSubmit(queue, 1, &submitInfo, frameFences[currentFrame]);
 
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -476,13 +498,16 @@ void draw() {
     presentInfo.pResults = nullptr;
 
     vkQueuePresentKHR(queue, &presentInfo);
-    vkQueueWaitIdle(queue);
+    currentFrame = (currentFrame + 1) % imageCount;
 }
 
 void clear() {
     vkDeviceWaitIdle(device);
-    vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
-    vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
+    for (size_t i = 0; i < imageCount; i++) {
+        vkDestroySemaphore(device, finishedSemaphores[i], nullptr);
+        vkDestroySemaphore(device, availableSemaphores[i], nullptr);
+        vkDestroyFence(device, frameFences[i], nullptr);
+    }
     vkDestroyCommandPool(device, commandPool, nullptr);
     for (auto framebuffer : framebuffers)
         vkDestroyFramebuffer(device, framebuffer, nullptr);

@@ -2,6 +2,9 @@
   <dictionary name="Root">
     <words>
       <w>framebuffers</w>
+      <w>multisampling</w>
+      <w>multiview</w>
+      <w>subpass</w>
       <w>swapchain</w>
     </words>
   </dictionary>

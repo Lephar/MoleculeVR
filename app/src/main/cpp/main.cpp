@@ -192,8 +192,7 @@ void pickDevice() {
     vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool);
 }
 
-VkImageView createImageView(VkImage image, uint32_t levels,
-                            VkFormat format, VkImageAspectFlags flags) {
+VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags flags) {
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -204,7 +203,7 @@ VkImageView createImageView(VkImage image, uint32_t levels,
     viewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
     viewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
     viewInfo.subresourceRange.aspectMask = flags;
-    viewInfo.subresourceRange.levelCount = levels;
+    viewInfo.subresourceRange.levelCount = 1;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.layerCount = 1;
     viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -245,24 +244,24 @@ void createSwapchain() {
     swapchainViews.resize(imageCount);
 
     for (size_t i = 0; i < imageCount; i++)
-        swapchainViews[i] = createImageView(swapchainImages[i], 1,
-                                            VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
+        swapchainViews[i] = createImageView(swapchainImages[i], VK_FORMAT_R8G8B8A8_UNORM,
+                                            VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 void createRenderPass() {
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = VK_FORMAT_R8G8B8A8_UNORM;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.samples = VK_SAMPLE_COUNT_2_BIT;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = VK_FORMAT_D32_SFLOAT;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.samples = VK_SAMPLE_COUNT_2_BIT;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -270,7 +269,18 @@ void createRenderPass() {
     depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    std::vector<VkAttachmentDescription> attachments{colorAttachment, depthAttachment};
+    VkAttachmentDescription resolveAttachment{};
+    resolveAttachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+    resolveAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    resolveAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    resolveAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    resolveAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    resolveAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    resolveAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    resolveAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    std::vector<VkAttachmentDescription> attachments{
+            colorAttachment, depthAttachment, resolveAttachment};
 
     VkAttachmentReference colorReference{};
     colorReference.attachment = 0;
@@ -280,11 +290,16 @@ void createRenderPass() {
     depthReference.attachment = 1;
     depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+    VkAttachmentReference resolveReference{};
+    resolveReference.attachment = 2;
+    resolveReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorReference;
     subpass.pDepthStencilAttachment = &depthReference;
+    subpass.pResolveAttachments = &resolveReference;
 
     VkSubpassDependency dependency{};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -414,7 +429,7 @@ void createPipeline() {
     VkPipelineMultisampleStateCreateInfo multisamplingInfo{};
     multisamplingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisamplingInfo.sampleShadingEnable = VK_FALSE;
-    multisamplingInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisamplingInfo.rasterizationSamples = VK_SAMPLE_COUNT_2_BIT;
     multisamplingInfo.minSampleShading = 1.0f;
     multisamplingInfo.pSampleMask = nullptr;
     multisamplingInfo.alphaToCoverageEnable = VK_FALSE;
@@ -534,8 +549,8 @@ void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyF
     vkBindBufferMemory(device, buffer, bufferMemory, 0);
 }
 
-void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
-                 VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
+void createImage(uint32_t width, uint32_t height, VkFormat format, VkSampleCountFlagBits samples,
+                 VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
                  VkImage &image, VkDeviceMemory &imageMemory) {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -549,7 +564,7 @@ void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling
     imageInfo.tiling = tiling;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     imageInfo.usage = usage;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.samples = samples;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     vkCreateImage(device, &imageInfo, nullptr, &image);
@@ -671,17 +686,26 @@ void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t imageWidth, uint
     endSingleTimeCommand(commandBuffer);
 }
 
+void createColorBuffer() {
+    createImage(swapchainExtent.width, swapchainExtent.height, VK_FORMAT_R8G8B8A8_UNORM,
+                VK_SAMPLE_COUNT_2_BIT, VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, colorImage, colorMemory);
+    colorView = createImageView(colorImage, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
+}
+
 void createDepthBuffer() {
     createImage(swapchainExtent.width, swapchainExtent.height, VK_FORMAT_D32_SFLOAT,
-                VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthMemory);
-    depthView = createImageView(depthImage, 1, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT);
+                VK_SAMPLE_COUNT_2_BIT, VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                depthImage, depthMemory);
+    depthView = createImageView(depthImage, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
 void createFramebuffers() {
     framebuffers.resize(imageCount);
     for (size_t i = 0; i < imageCount; i++) {
-        std::vector<VkImageView> attachments{swapchainViews[i], depthView};
+        std::vector<VkImageView> attachments{colorView, depthView, swapchainViews[i]};
         VkFramebufferCreateInfo framebufferInfo{};
         framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         framebufferInfo.renderPass = renderPass;
@@ -867,6 +891,7 @@ void setup() {
     createSwapchain();
     createRenderPass();
     createPipeline();
+    createColorBuffer();
     createDepthBuffer();
     createFramebuffers();
     createVertexBuffer();
@@ -962,9 +987,12 @@ void clear() {
     vkFreeMemory(device, vertexMemory, nullptr);
     for (auto framebuffer : framebuffers)
         vkDestroyFramebuffer(device, framebuffer, nullptr);
-    vkFreeMemory(device, depthMemory, nullptr);
     vkDestroyImageView(device, depthView, nullptr);
     vkDestroyImage(device, depthImage, nullptr);
+    vkFreeMemory(device, depthMemory, nullptr);
+    vkDestroyImageView(device, colorView, nullptr);
+    vkDestroyImage(device, colorImage, nullptr);
+    vkFreeMemory(device, colorMemory, nullptr);
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);

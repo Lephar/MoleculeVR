@@ -27,7 +27,8 @@ struct Vertex {
 
 struct Transform {
     glm::mat4 model;
-    glm::mat4 view;
+    glm::mat4 left;
+    glm::mat4 right;
     glm::mat4 proj;
 };
 
@@ -56,7 +57,6 @@ VkPhysicalDevice physicalDevice;
 VkDevice device;
 VkQueue queue;
 VkCommandPool commandPool;
-uint32_t layerCount;
 VkSwapchainKHR swapchain;
 VkExtent2D swapchainExtent;
 uint32_t imageCount, currentImage;
@@ -66,7 +66,7 @@ VkShaderModule vertexShader, fragmentShader;
 VkRenderPass renderPass;
 VkDescriptorSetLayout descriptorSetLayout;
 VkPipelineLayout pipelineLayout;
-VkPipeline graphicsPipeline;
+VkPipeline leftGraphicsPipeline, rightGraphicsPipeline;
 std::vector<VkFramebuffer> framebuffers;
 VkImage depthImage, colorImage;
 VkImageView depthView, colorView;
@@ -106,12 +106,12 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     return VK_FALSE;
 }
 
+//TODO: use multiview extension instead of hard coded pipelines
 void initialize() {
     std::vector<const char *> layers, extensions;
     layers.push_back("VK_LAYER_KHRONOS_validation");
     extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
     extensions.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
-    extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
     extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
     VkApplicationInfo applicationInfo{};
@@ -165,7 +165,6 @@ void pickDevice() {
     std::vector<const char *> deviceLayers, deviceExtensions;
     deviceLayers.push_back("VK_LAYER_KHRONOS_validation");
     deviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    deviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
 
     VkDeviceQueueCreateInfo queueInfo{};
     queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -213,6 +212,7 @@ VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags f
     return imageView;
 }
 
+//TODO: implement better orientation correction
 void createSwapchain() {
     VkSurfaceCapabilitiesKHR capabilities;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);
@@ -309,15 +309,6 @@ void createRenderPass() {
     dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
-    const uint32_t viewMask = 0b00000011, correlationMask = 0b00000011;
-
-    VkRenderPassMultiviewCreateInfo multiviewInfo{};
-    multiviewInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO;
-    multiviewInfo.subpassCount = 1;
-    multiviewInfo.pViewMasks = &viewMask;
-    multiviewInfo.correlationMaskCount = 1;
-    multiviewInfo.pCorrelationMasks = &correlationMask;
-
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     renderPassInfo.attachmentCount = attachments.size();
@@ -326,7 +317,6 @@ void createRenderPass() {
     renderPassInfo.pSubpasses = &subpass;
     renderPassInfo.dependencyCount = 1;
     renderPassInfo.pDependencies = &dependency;
-    //renderPassInfo.pNext = &multiviewInfo;
 
     vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass);
 }
@@ -349,9 +339,25 @@ VkShaderModule readShader(const char *path) {
     return shader;
 }
 
+//TODO: implement pipeline caching
 void createPipeline() {
     vertexShader = readShader("shaders/shader.vert.spv");
     fragmentShader = readShader("shaders/shader.frag.spv");
+
+    VkSpecializationMapEntry specializationMapEntry{0, 0, sizeof(float)};
+
+    VkSpecializationInfo specializationInfo{};
+    specializationInfo.dataSize = sizeof(float);
+    specializationInfo.mapEntryCount = 1;
+    specializationInfo.pMapEntries = &specializationMapEntry;
+
+    float leftEyeConstant = -1.0f, rightEyeConstant = 1.0f;
+
+    VkSpecializationInfo leftSpecializationInfo = specializationInfo;
+    leftSpecializationInfo.pData = &leftEyeConstant;
+
+    VkSpecializationInfo rightSpecializationInfo = specializationInfo;
+    rightSpecializationInfo.pData = &rightEyeConstant;
 
     VkPipelineShaderStageCreateInfo vertexInfo{};
     vertexInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -359,24 +365,34 @@ void createPipeline() {
     vertexInfo.module = vertexShader;
     vertexInfo.pName = "main";
 
+    VkPipelineShaderStageCreateInfo leftVertexInfo = vertexInfo;
+    leftVertexInfo.pSpecializationInfo = &leftSpecializationInfo;
+
+    VkPipelineShaderStageCreateInfo rightVertexInfo = vertexInfo;
+    rightVertexInfo.pSpecializationInfo = &rightSpecializationInfo;
+
     VkPipelineShaderStageCreateInfo fragmentInfo{};
     fragmentInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     fragmentInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     fragmentInfo.module = fragmentShader;
     fragmentInfo.pName = "main";
 
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages{vertexInfo, fragmentInfo};
+    std::vector<VkPipelineShaderStageCreateInfo> leftShaderStages{leftVertexInfo, fragmentInfo};
+    std::vector<VkPipelineShaderStageCreateInfo> rightShaderStages{rightVertexInfo, fragmentInfo};
 
     VkVertexInputBindingDescription bindingDescription{};
     bindingDescription.binding = 0;
     bindingDescription.stride = sizeof(Vertex);
     bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    VkVertexInputAttributeDescription attributeDescriptions[2]{};
+    std::vector<VkVertexInputAttributeDescription> attributeDescriptions;
+    attributeDescriptions.resize(2);
+
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
     attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescriptions[0].offset = offsetof(Vertex, pos);
+
     attributeDescriptions[1].binding = 0;
     attributeDescriptions[1].location = 1;
     attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -386,8 +402,8 @@ void createPipeline() {
     inputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     inputInfo.vertexBindingDescriptionCount = 1;
     inputInfo.pVertexBindingDescriptions = &bindingDescription;
-    inputInfo.vertexAttributeDescriptionCount = 2;
-    inputInfo.pVertexAttributeDescriptions = attributeDescriptions;
+    inputInfo.vertexAttributeDescriptionCount = attributeDescriptions.size();
+    inputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
     VkPipelineInputAssemblyStateCreateInfo assemblyInfo{};
     assemblyInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -397,21 +413,41 @@ void createPipeline() {
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
-    viewport.width = (float) swapchainExtent.width;
-    viewport.height = (float) swapchainExtent.height;
+    viewport.width = swapchainExtent.width;
+    viewport.height = swapchainExtent.height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
+
+    VkViewport leftViewport = viewport;
+    leftViewport.width /= 2;
+
+    VkViewport rightViewport = viewport;
+    rightViewport.width /= 2;
+    rightViewport.x += leftViewport.width;
 
     VkRect2D scissor{};
     scissor.offset = {0, 0};
     scissor.extent = swapchainExtent;
 
+    VkRect2D leftScissor = scissor;
+    leftScissor.extent.width /= 2;
+
+    VkRect2D rightScissor = scissor;
+    rightScissor.extent.width /= 2;
+    rightScissor.offset.x = leftScissor.extent.width;
+
     VkPipelineViewportStateCreateInfo viewportInfo{};
     viewportInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewportInfo.viewportCount = 1;
-    viewportInfo.pViewports = &viewport;
     viewportInfo.scissorCount = 1;
-    viewportInfo.pScissors = &scissor;
+
+    VkPipelineViewportStateCreateInfo leftViewportInfo = viewportInfo;
+    leftViewportInfo.pViewports = &leftViewport;
+    leftViewportInfo.pScissors = &leftScissor;
+
+    VkPipelineViewportStateCreateInfo rightViewportInfo = viewportInfo;
+    rightViewportInfo.pViewports = &rightViewport;
+    rightViewportInfo.pScissors = &rightScissor;
 
     VkPipelineRasterizationStateCreateInfo rasterizerInfo{};
     rasterizerInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -496,11 +532,9 @@ void createPipeline() {
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = shaderStages.size();
-    pipelineInfo.pStages = shaderStages.data();
+    pipelineInfo.stageCount = 2;
     pipelineInfo.pVertexInputState = &inputInfo;
     pipelineInfo.pInputAssemblyState = &assemblyInfo;
-    pipelineInfo.pViewportState = &viewportInfo;
     pipelineInfo.pRasterizationState = &rasterizerInfo;
     pipelineInfo.pMultisampleState = &multisamplingInfo;
     pipelineInfo.pDepthStencilState = &depthStencil;
@@ -512,7 +546,18 @@ void createPipeline() {
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
     pipelineInfo.basePipelineIndex = -1;
 
-    vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline);
+    VkGraphicsPipelineCreateInfo leftPipelineInfo = pipelineInfo;
+    leftPipelineInfo.pStages = leftShaderStages.data();
+    leftPipelineInfo.pViewportState = &leftViewportInfo;
+
+    VkGraphicsPipelineCreateInfo rightPipelineInfo = pipelineInfo;
+    rightPipelineInfo.pStages = rightShaderStages.data();
+    rightPipelineInfo.pViewportState = &rightViewportInfo;
+
+    vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &leftPipelineInfo, nullptr,
+                              &leftGraphicsPipeline);
+    vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &rightPipelineInfo, nullptr,
+                              &rightGraphicsPipeline);
 }
 
 uint32_t chooseMemoryType(uint32_t filter, VkMemoryPropertyFlags flags) {
@@ -852,12 +897,18 @@ void createCommandBuffers() {
 
         vkBeginCommandBuffer(commandBuffers[i], &beginInfo);
         vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-        vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
         vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, &vertexBuffer, offsets.data());
         vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT16);
         vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
                                 0, 1, &descriptorSets[i], 0, nullptr);
+
+        vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, leftGraphicsPipeline);
         vkCmdDrawIndexed(commandBuffers[i], indices.size(), 1, 0, 0, 0);
+
+        vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          rightGraphicsPipeline);
+        vkCmdDrawIndexed(commandBuffers[i], indices.size(), 1, 0, 0, 0);
+
         vkCmdEndRenderPass(commandBuffers[i]);
         vkEndCommandBuffer(commandBuffers[i]);
     }
@@ -909,13 +960,16 @@ void updateUniformBuffer(uint32_t imageIndex) {
     float time = std::chrono::duration<float, std::chrono::seconds::period>(
             currentTime - startTime).count();
 
+    float eyeSeparation = 0.08f;
     Transform transform{};
     transform.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f),
                                   glm::vec3(0.0f, 0.0f, 1.0f));
-    transform.view = glm::lookAt(glm::vec3(0.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
+    transform.left = glm::lookAt(glm::vec3(-eyeSeparation, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
                                  glm::vec3(0.0f, 0.0f, 1.0f));
-    transform.proj = glm::perspective(glm::radians(45.0f), (float) swapchainExtent.width /
-                                                           (float) swapchainExtent.height, 0.1f,
+    transform.right = glm::lookAt(glm::vec3(eyeSeparation, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
+                                  glm::vec3(0.0f, 0.0f, 1.0f));
+    transform.proj = glm::perspective(glm::radians(45.0f),
+                                      (swapchainExtent.width / 2.0f) / swapchainExtent.height, 0.1f,
                                       10.0f);
     transform.proj[1][1] *= -1;
 
@@ -993,7 +1047,8 @@ void clear() {
     vkDestroyImageView(device, colorView, nullptr);
     vkDestroyImage(device, colorImage, nullptr);
     vkFreeMemory(device, colorMemory, nullptr);
-    vkDestroyPipeline(device, graphicsPipeline, nullptr);
+    vkDestroyPipeline(device, rightGraphicsPipeline, nullptr);
+    vkDestroyPipeline(device, leftGraphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
     vkDestroyRenderPass(device, renderPass, nullptr);
@@ -1023,7 +1078,7 @@ void handle_cmd(android_app *pApp, int32_t cmd) {
     }
 }
 
-extern "C" void android_main(struct android_app *pApp) {
+void android_main(struct android_app *pApp) {
     pApp->onAppCmd = handle_cmd;
 
     int events;

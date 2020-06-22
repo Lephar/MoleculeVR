@@ -3,7 +3,8 @@
 
 layout(binding = 0) uniform Transform {
     mat4 model;
-    mat4 view;
+    mat4 left;
+    mat4 right;
     mat4 proj;
 } transform;
 
@@ -12,7 +13,16 @@ layout(location = 1) in vec3 inColor;
 
 layout(location = 0) out vec3 fragColor;
 
+layout (constant_id = 0) const float eyeConstant = 0.0f;
+
 void main() {
-    gl_Position = transform.proj * transform.view * transform.model * vec4(inPosition, 1.0);
+    if (eyeConstant < 0.0f) {
+        gl_Position = transform.proj * transform.left * transform.model * vec4(inPosition, 1.0);
+    }
+
+    if (eyeConstant > 0.0f) {
+        gl_Position = transform.proj * transform.right * transform.model * vec4(inPosition, 1.0);
+    }
+
     fragColor = inColor;
 }

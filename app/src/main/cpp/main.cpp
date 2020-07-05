@@ -2,9 +2,11 @@
 #include <fstream>
 #include <iostream>
 #include <chrono>
+
 #include <jni.h>
 #include <android_native_app_glue.h>
 #include <android/log.h>
+#include <android/sensor.h>
 #include <android/asset_manager.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_android.h>
@@ -50,6 +52,7 @@ const std::vector<uint16_t> indices = {
 };
 
 android_app *app;
+ASensorEventQueue *gyroscope;
 VkInstance instance;
 VkDebugUtilsMessengerEXT messenger;
 VkSurfaceKHR surface;
@@ -715,7 +718,7 @@ void transitionImageLayout(VkImage image, uint32_t levels, VkFormat format, VkIm
 void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t imageWidth, uint32_t imageHeight) {
     VkCommandBuffer commandBuffer = beginSingleTimeCommand();
 
-    VkBufferImageCopy region = {};
+    VkBufferImageCopy region{};
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.mipLevel = 0;
     region.imageSubresource.baseArrayLayer = 0;
@@ -955,19 +958,31 @@ void setup() {
 }
 
 void updateUniformBuffer(uint32_t imageIndex) {
+    static ASensorEvent event{};
+    static glm::mat4 rotation(1.0f);
+    static const float margin = 0.08f;
+
+    while (ASensorEventQueue_hasEvents(gyroscope) == 1) {
+        ASensorEventQueue_getEvents(gyroscope, &event, 1);
+        rotation = glm::rotate(rotation, -event.vector.y / 8.0f, glm::vec3(1.0f, 0.0f, 0.0f));
+        rotation = glm::rotate(rotation, -event.vector.z / 8.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+        rotation = glm::rotate(rotation, event.vector.x / 8.0f, glm::vec3(0.0f, 0.0f, 1.0f));
+    }
+
+    glm::vec3 center(0.0f, 2.0f, 2.0f);
+    glm::vec3 forward = rotation * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+    glm::vec3 left = rotation * glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+    glm::vec3 up = rotation * glm::vec4(0.0f, 0.0f, 1.0f, 0.0f);
+
     static auto startTime = std::chrono::high_resolution_clock::now();
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(
             currentTime - startTime).count();
 
-    float eyeSeparation = 0.08f;
     Transform transform{};
-    transform.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f),
-                                  glm::vec3(0.0f, 0.0f, 1.0f));
-    transform.left = glm::lookAt(glm::vec3(-eyeSeparation, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
-                                 glm::vec3(0.0f, 0.0f, 1.0f));
-    transform.right = glm::lookAt(glm::vec3(eyeSeparation, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
-                                  glm::vec3(0.0f, 0.0f, 1.0f));
+    transform.model = glm::mat4(1.0f);
+    transform.left = glm::lookAt(center + margin * left, center + forward, up);
+    transform.right = glm::lookAt(center - margin * left, center + forward, up);
     transform.proj = glm::perspective(glm::radians(45.0f),
                                       (swapchainExtent.width / 2.0f) / swapchainExtent.height, 0.1f,
                                       10.0f);
@@ -1084,14 +1099,19 @@ void android_main(struct android_app *pApp) {
     int events;
     android_poll_source *pSource;
 
+    auto manager = ASensorManager_getInstance();
+    auto sensor = ASensorManager_getDefaultSensor(manager, ASENSOR_TYPE_GYROSCOPE);
+    gyroscope = ASensorManager_createEventQueue(manager, pApp->looper, LOOPER_ID_USER, nullptr,
+                                                nullptr);
+    ASensorEventQueue_enableSensor(gyroscope, sensor);
+
     uint32_t previousFrame = 0, currentFrame = 0;
     uint64_t currentTime, previousTime = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
 
     do {
-        if (ALooper_pollAll(0, nullptr, &events, (void **) &pSource) >= 0)
-            if (pSource)
-                pSource->process(pApp, pSource);
+        if (ALooper_pollAll(0, nullptr, &events, (void **) &pSource) >= 0 && pSource)
+            pSource->process(pApp, pSource);
 
         if (pApp->userData) {
             draw();

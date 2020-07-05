@@ -13,7 +13,7 @@ layout(location = 1) in vec3 inColor;
 
 layout(location = 0) out vec3 fragColor;
 
-layout (constant_id = 0) const float eyeConstant = 0.0f;
+layout(constant_id = 0) const float eyeConstant = 0.0f;
 
 void main() {
     if (eyeConstant < 0.0f) {

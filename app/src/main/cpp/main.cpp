@@ -1,21 +1,25 @@
+#include <jni.h>
+
 #include <vector>
 #include <fstream>
 #include <iostream>
 #include <chrono>
 
-#include <jni.h>
 #include <android_native_app_glue.h>
 #include <android/log.h>
 #include <android/sensor.h>
 #include <android/asset_manager.h>
+
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_android.h>
 
 #define STB_IMAGE_IMPLEMENTATION
+
+#include <stb/stb_image.h>
+
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
 
-#include <stb/stb_image.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -34,25 +38,25 @@ struct Transform {
     glm::mat4 proj;
 };
 
-const std::vector<Vertex> vertices = {
-        {{-0.5f, -0.5f, 0.0f},  {1.0f, 0.0f, 0.0f}},
-        {{0.5f,  -0.5f, 0.0f},  {0.0f, 1.0f, 0.0f}},
-        {{0.5f,  0.5f,  0.0f},  {0.0f, 0.0f, 1.0f}},
-        {{-0.5f, 0.5f,  0.0f},  {1.0f, 1.0f, 1.0f}},
-
+std::vector<Vertex> vertices, vertexData = {
         {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
         {{0.5f,  -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
         {{0.5f,  0.5f,  -0.5f}, {0.0f, 0.0f, 1.0f}},
-        {{-0.5f, 0.5f,  -0.5f}, {1.0f, 1.0f, 1.0f}}
-};
+        {{-0.5f, 0.5f,  -0.5f}, {1.0f, 1.0f, 1.0f}},
 
-const std::vector<uint16_t> indices = {
+        {{-0.5f, -0.5f, -1.0f}, {1.0f, 0.0f, 0.0f}},
+        {{0.5f,  -0.5f, -1.0f}, {0.0f, 1.0f, 0.0f}},
+        {{0.5f,  0.5f,  -1.0f}, {0.0f, 0.0f, 1.0f}},
+        {{-0.5f, 0.5f,  -1.0f}, {1.0f, 1.0f, 1.0f}}
+};;
+
+std::vector<uint16_t> indices, indexData = {
         0, 1, 2, 2, 3, 0,
         4, 5, 6, 6, 7, 4
 };
 
 android_app *app;
-ASensorEventQueue *gyroscope;
+ASensorEventQueue *sensorQueue;
 VkInstance instance;
 VkDebugUtilsMessengerEXT messenger;
 VkSurfaceKHR surface;
@@ -128,12 +132,12 @@ void initialize() {
     VkDebugUtilsMessengerCreateInfoEXT messengerInfo{};
     messengerInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
     messengerInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                                    VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
-                                    VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                                    VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
     messengerInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                                VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+            VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     messengerInfo.pfnUserCallback = debugCallback;
 
     VkInstanceCreateInfo instanceInfo{};
@@ -488,9 +492,9 @@ void createPipeline() {
 
     VkPipelineColorBlendAttachmentState blendAttachment{};
     blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
-                                     VK_COLOR_COMPONENT_G_BIT |
-                                     VK_COLOR_COMPONENT_B_BIT |
-                                     VK_COLOR_COMPONENT_A_BIT;
+            VK_COLOR_COMPONENT_G_BIT |
+            VK_COLOR_COMPONENT_B_BIT |
+            VK_COLOR_COMPONENT_A_BIT;
     blendAttachment.blendEnable = VK_TRUE;
     blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
     blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
@@ -698,15 +702,15 @@ void transitionImageLayout(VkImage image, uint32_t levels, VkFormat format, VkIm
     } else if (layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
         barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-                                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     } else if (layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
         barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT |
-                                              (format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
-                                               format == VK_FORMAT_D24_UNORM_S8_UINT
-                                               ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+                (format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+                         format == VK_FORMAT_D24_UNORM_S8_UINT
+                 ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
         barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     }
 
@@ -767,6 +771,18 @@ void createFramebuffers() {
 }
 
 void createVertexBuffer() {
+
+    for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+            for (auto vertex : vertexData) {
+                auto data = vertex;
+                data.pos.x += i * 2;
+                data.pos.y += j * 2;
+                vertices.push_back(data);
+            }
+        }
+    }
+
     VkDeviceSize bufferSize = sizeof(Vertex) * vertices.size();
 
     VkBuffer stagingBuffer;
@@ -789,6 +805,12 @@ void createVertexBuffer() {
 }
 
 void createIndexBuffer() {
+    for (int i = 0; i < 9; i++) {
+        for (auto index : indexData) {
+            indices.push_back(index + vertexData.size() * i);
+        }
+    }
+
     VkDeviceSize bufferSize = sizeof(uint16_t) * indices.size();
 
     VkBuffer stagingBuffer;
@@ -962,14 +984,14 @@ void updateUniformBuffer(uint32_t imageIndex) {
     static glm::mat4 rotation(1.0f);
     static const float margin = 0.08f;
 
-    while (ASensorEventQueue_hasEvents(gyroscope) == 1) {
-        ASensorEventQueue_getEvents(gyroscope, &event, 1);
-        rotation = glm::rotate(rotation, -event.vector.y / 8.0f, glm::vec3(1.0f, 0.0f, 0.0f));
-        rotation = glm::rotate(rotation, -event.vector.z / 8.0f, glm::vec3(0.0f, 1.0f, 0.0f));
-        rotation = glm::rotate(rotation, event.vector.x / 8.0f, glm::vec3(0.0f, 0.0f, 1.0f));
+    while (ASensorEventQueue_hasEvents(sensorQueue) == 1) {
+        ASensorEventQueue_getEvents(sensorQueue, &event, 1);
+        rotation = glm::rotate(rotation, -event.vector.y / 60.0f, glm::vec3(1.0f, 0.0f, 0.0f));
+        rotation = glm::rotate(rotation, -event.vector.z / 60.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+        rotation = glm::rotate(rotation, event.vector.x / 60.0f, glm::vec3(0.0f, 0.0f, 1.0f));
     }
 
-    glm::vec3 center(0.0f, 2.0f, 2.0f);
+    glm::vec3 center(0.0f, 0.0f, 0.0f);
     glm::vec3 forward = rotation * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
     glm::vec3 left = rotation * glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
     glm::vec3 up = rotation * glm::vec4(0.0f, 0.0f, 1.0f, 0.0f);
@@ -1099,11 +1121,12 @@ void android_main(struct android_app *pApp) {
     int events;
     android_poll_source *pSource;
 
-    auto manager = ASensorManager_getInstance();
-    auto sensor = ASensorManager_getDefaultSensor(manager, ASENSOR_TYPE_GYROSCOPE);
-    gyroscope = ASensorManager_createEventQueue(manager, pApp->looper, LOOPER_ID_USER, nullptr,
-                                                nullptr);
-    ASensorEventQueue_enableSensor(gyroscope, sensor);
+    auto sensorManager = ASensorManager_getInstance();
+    auto physicalSensor = ASensorManager_getDefaultSensor(sensorManager, ASENSOR_TYPE_GYROSCOPE);
+    sensorQueue = ASensorManager_createEventQueue(sensorManager, pApp->looper, LOOPER_ID_USER,
+                                                  nullptr, nullptr);
+    ASensorEventQueue_enableSensor(sensorQueue, physicalSensor);
+    ASensorEventQueue_setEventRate(sensorQueue, physicalSensor, 16666);
 
     uint32_t previousFrame = 0, currentFrame = 0;
     uint64_t currentTime, previousTime = std::chrono::duration_cast<std::chrono::milliseconds>(

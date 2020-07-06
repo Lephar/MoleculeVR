@@ -48,7 +48,7 @@ std::vector<Vertex> vertices, vertexData = {
         {{0.5f,  -0.5f, -1.0f}, {0.0f, 1.0f, 0.0f}},
         {{0.5f,  0.5f,  -1.0f}, {0.0f, 0.0f, 1.0f}},
         {{-0.5f, 0.5f,  -1.0f}, {1.0f, 1.0f, 1.0f}}
-};;
+};
 
 std::vector<uint16_t> indices, indexData = {
         0, 1, 2, 2, 3, 0,
@@ -986,9 +986,9 @@ void updateUniformBuffer(uint32_t imageIndex) {
 
     while (ASensorEventQueue_hasEvents(sensorQueue) == 1) {
         ASensorEventQueue_getEvents(sensorQueue, &event, 1);
-        rotation = glm::rotate(rotation, -event.vector.y / 60.0f, glm::vec3(1.0f, 0.0f, 0.0f));
-        rotation = glm::rotate(rotation, -event.vector.z / 60.0f, glm::vec3(0.0f, 1.0f, 0.0f));
-        rotation = glm::rotate(rotation, event.vector.x / 60.0f, glm::vec3(0.0f, 0.0f, 1.0f));
+        rotation = glm::rotate(rotation, -event.vector.y / 120.0f, glm::vec3(1.0f, 0.0f, 0.0f));
+        rotation = glm::rotate(rotation, -event.vector.z / 120.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+        rotation = glm::rotate(rotation, event.vector.x / 120.0f, glm::vec3(0.0f, 0.0f, 1.0f));
     }
 
     glm::vec3 center(0.0f, 0.0f, 0.0f);
@@ -1151,4 +1151,7 @@ void android_main(struct android_app *pApp) {
             currentFrame++;
         }
     } while (!pApp->destroyRequested);
+
+    ASensorEventQueue_disableSensor(sensorQueue, physicalSensor);
+    ASensorManager_destroyEventQueue(sensorManager, sensorQueue);
 }

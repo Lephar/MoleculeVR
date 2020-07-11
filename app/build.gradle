@@ -3,17 +3,23 @@ apply plugin: 'kotlin-android'
 apply plugin: 'kotlin-android-extensions'
 
 android {
-    compileSdkVersion 29
-    buildToolsVersion "29.0.3"
+    compileSdkVersion 30
+    buildToolsVersion "30.0.1"
+    ndkVersion "21.3.6528147"
 
     defaultConfig {
         applicationId "edu.etugraphics.moleculevr"
         minSdkVersion 24
-        targetSdkVersion 29
+        targetSdkVersion 30
         versionCode 1
         versionName "1.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    compileOptions {
+        sourceCompatibility kotlin_version
+        targetCompatibility kotlin_version
     }
 
     buildTypes {
@@ -29,9 +35,12 @@ android {
         }
     }
 
-    compileOptions {
-        sourceCompatibility kotlin_version
-        targetCompatibility kotlin_version
+    sourceSets {
+        main {
+            jniLibs {
+                srcDir "${android.ndkDirectory}/sources/third_party/vulkan/src/build-android/jniLibs"
+            }
+        }
     }
 }
 

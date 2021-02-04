@@ -19,13 +19,14 @@
 #	pragma message("GLM: GLM_EXT_vector_int1 extension included")
 #endif
 
-namespace glm {
-    /// @addtogroup ext_vector_int1
-    /// @{
+namespace glm
+{
+	/// @addtogroup ext_vector_int1
+	/// @{
 
-    /// 1 component vector of signed integer numbers.
-    typedef vec<1, int, defaultp> ivec1;
+	/// 1 component vector of signed integer numbers.
+	typedef vec<1, int, defaultp>			ivec1;
 
-    /// @}
+	/// @}
 }//namespace glm
 

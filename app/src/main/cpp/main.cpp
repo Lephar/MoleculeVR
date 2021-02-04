@@ -13,10 +13,6 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_android.h>
 
-#define STB_IMAGE_IMPLEMENTATION
-
-#include <stb/stb_image.h>
-
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
 
